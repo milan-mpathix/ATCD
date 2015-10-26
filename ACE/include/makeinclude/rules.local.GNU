@@ -51,9 +51,6 @@ endif
 
 ifneq ($(use_pwd_call),1)
 makefile_name.local:
-	@echo
-	@echo GNUmakefile: $(shell pwd)/$(MAKEFILE) MAKEFLAGS=$(MAKEFLAGS)
-	@echo
 else
 ECHO_BLANK_LINE ?= echo
 makefile_name.local:

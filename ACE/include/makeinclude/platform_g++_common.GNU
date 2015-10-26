@@ -81,6 +81,10 @@ ifeq ($(gcov),1)
   LDFLAGS += --coverage
 endif
 
+ifeq (,$(buildbits))
+  buildbits = native
+endif
+
 ifeq ($(CXX),insure)
   # insure does not pass through the -dumpversion option.
   CXX_FOR_VERSION_TEST ?= g++
@@ -187,7 +191,7 @@ ifeq ($(shared_libs), 1)
       ifneq ($(mingw32),1)
         LD_EXPORT_DEFINED := $(shell sh -c '$(LD_FOR_VERSION_TEST) -E 2>&1 | egrep -i "(option|flag)" /dev/null; echo $$?')
       else
-        LD_EXPORT_DEFINED := $(shell $(LD_FOR_VERSION_TEST) -E 2>&1 | grep -c -i -e '(option|flag)')
+        LD_EXPORT_DEFINED := $(shell $(LD_FOR_VERSION_TEST) -E 2>&1 | egrep -c -i -e '(option|flag)')
 	    ifeq ($(LD_EXPORT_DEFINED),0)
 	      LD_EXPORT_DEFINED:=1
 	    else
@@ -227,6 +231,14 @@ else
     CPPFLAGS += -DACE_HAS_CUSTOM_EXPORT_MACROS=0
   endif # GXX_4_OR_BETTER == 1
 endif # shared_libs
+
+ifeq ($(buildbits),32)
+  CFLAGS    += -m32
+endif
+ifeq ($(buildbits),64)
+  CFLAGS    += -m64
+  LDFLAGS   += -m64
+endif
 
 minimaltoc ?= 0
 ifeq ($(minimaltoc),1)

@@ -281,8 +281,8 @@ ifeq ($(debug),0)
   DEFFLAGS        += -DNDEBUG
 endif
 
-ifeq (,$(findstring -I$(ACE_ROOT),$(INCLDIRS)))
-  INCLDIRS        += -I$(ACE_ROOT)
+ifeq (,$(findstring -isystem $(ACE_ROOT),$(INCLDIRS)))
+  INCLDIRS        += -isystem $(ACE_ROOT)
 endif
 
 CPPFLAGS          += $(DEFFLAGS) $(INCLDIRS)
@@ -675,7 +675,7 @@ ifeq ($(ssl),0)
 else
   ifneq ($(SSL_ROOT), /usr)
     ifneq ($(SSL_ROOT),)
-      PLATFORM_SSL_CPPFLAGS += -I$(SSL_ROOT)/include
+      PLATFORM_SSL_CPPFLAGS += -isystem $(SSL_ROOT)/include
       PLATFORM_SSL_LDFLAGS  += -L$(SSL_ROOT)/lib
     endif
   endif
