@@ -1979,6 +1979,8 @@ ACE_Dev_Poll_Reactor::cancel_timer (ACE_Event_Handler *handler,
 {
   ACE_TRACE ("ACE_Dev_Poll_Reactor::cancel_timer");
 
+  ACE_MT (ACE_GUARD_RETURN (ACE_Dev_Poll_Reactor_Token, mon, this->token_, -1));
+
   // Don't bother waking the poll - the worse that will happen is it will
   // wake up for a timer that doesn't exist then go back to waiting.
   if ((this->timer_queue_ != 0) && (handler != 0))
@@ -1993,6 +1995,8 @@ ACE_Dev_Poll_Reactor::cancel_timer (long timer_id,
                                     int dont_call_handle_close)
 {
   ACE_TRACE ("ACE_Dev_Poll_Reactor::cancel_timer");
+
+  ACE_MT (ACE_GUARD_RETURN (ACE_Dev_Poll_Reactor_Token, mon, this->token_, -1));
 
   // Don't bother waking the poll - the worse that will happen is it will
   // wake up for a timer that doesn't exist then go back to waiting.
