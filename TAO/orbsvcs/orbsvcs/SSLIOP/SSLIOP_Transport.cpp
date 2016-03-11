@@ -256,71 +256,47 @@ TAO::SSLIOP::Transport::get_listen_point (
   // with the SSLIOP_Acceptor.
   const ::SSLIOP::SSL &ssl = ssliop_acceptor->ssl_component ();
 
-  // Get the local address of the connection
-  ACE_INET_Addr local_addr;
-  {
-    if (this->connection_handler_->peer ().get_local_addr (local_addr) == -1)
-      {
-        ORBSVCS_ERROR_RETURN ((LM_ERROR,
-                           ACE_TEXT ("(%P|%t) Could not resolve local host")
-                           ACE_TEXT (" address in get_listen_point()\n")),
-                        -1);
-      }
-
-  }
-
-  // Note: Looks like there is no point in sending the list of
-  // endpoints on interfaces on which this connection has not
-  // been established. If this is wrong, please correct me.
-  CORBA::String_var local_interface;
-
-  // Get the hostname for the local address
-  if (ssliop_acceptor->hostname (this->orb_core_,
-                                 local_addr,
-                                 local_interface.out ()) == -1)
-    {
-      ORBSVCS_ERROR_RETURN ((LM_ERROR,
-                         ACE_TEXT ("(%P|%t) Could not resolve local host")
-                         ACE_TEXT (" name\n")),
-                        -1);
-    }
-
-#if defined (ACE_HAS_IPV6)
-  // If this is an IPv6 decimal linklocal address containing a scopeid than
-  // remove the scopeid from the information being sent.
-  const char *cp_scope = 0;
-  if (local_addr.get_type () == PF_INET6 &&
-        (cp_scope = ACE_OS::strchr (local_interface.in (), '%')) != 0)
-    {
-      CORBA::ULong len = cp_scope - local_interface.in ();
-      local_interface[len] = '\0';
-    }
-#endif /* ACE_HAS_IPV6 */
-
   for (size_t index = 0; index < count; ++index)
     {
-      // Make sure port numbers are equal so the following comparison
-      // only concerns the IP(v4/v6) address.
-      local_addr.set_port_number (endpoint_addr[index].get_port_number ());
-
-      if (local_addr == endpoint_addr[index])
+      CORBA::String_var endpoint_interface;
+      if (ssliop_acceptor->hostname (this->orb_core_,
+                                     endpoint_addr[index],
+                                     endpoint_interface.out ()) == -1)
         {
-          // Get the count of the number of elements
-          CORBA::ULong const len = listen_point_list.length ();
-
-          // Increase the length by 1
-          listen_point_list.length (len + 1);
-
-          // We have the connection and the acceptor endpoint on the
-          // same interface
-          IIOP::ListenPoint & point = listen_point_list[len];
-          point.host = CORBA::string_dup (local_interface.in ());
-
-          // All endpoints, if more than one, serviced by the
-          // SSLIOP_Acceptor should be listening on the same port (due
-          // to the bind to the INADDR_ANY address).
-          point.port = ssl.port;
+          ORBSVCS_ERROR_RETURN ((
+                LM_ERROR,
+                ACE_TEXT ("(%P|%t) Could not resolve local host")
+                ACE_TEXT (" name\n")),
+                -1);
         }
+
+#if defined (ACE_HAS_IPV6)
+      // If this is an IPv6 decimal linklocal address containing a scopeid than
+      // remove the scopeid from the information being sent.
+      const char *cp_scope = 0;
+      if (endpoint_addr[index].get_type () == PF_INET6 &&
+          (cp_scope = ACE_OS::strchr (endpoint_interface.in (), '%')) != 0)
+        {
+          CORBA::ULong len = cp_scope - endpoint_interface.in ();
+          endpoint_interface[len] = '\0';
+        }
+#endif /* ACE_HAS_IPV6 */
+
+      // Get the count of the number of elements
+      CORBA::ULong const len = listen_point_list.length ();
+
+      // Increase the length by 1
+      listen_point_list.length (len + 1);
+
+      // We have the connection and the acceptor endpoint on the
+      // same interface
+      IIOP::ListenPoint& point = listen_point_list[len];
+      point.host = CORBA::string_dup (endpoint_interface.in ());
+
+      // All endpoints, if more than one, serviced by the
+      // SSLIOP_Acceptor should be listening on the same port (due
+      // to the bind to the INADDR_ANY address).
+      point.port = ssl.port;
     }
 
   return 1;
