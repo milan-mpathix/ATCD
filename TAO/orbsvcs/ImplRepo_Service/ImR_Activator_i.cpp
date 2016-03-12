@@ -139,8 +139,13 @@ ImR_Activator_i::init_with_orb (CORBA::ORB_ptr orb, const Activator_Options& opt
         "ImR_Activator");
       ACE_ASSERT (! CORBA::is_nil(this->imr_poa_.in ()));
 
+      obj = orb->resolve_initial_references ("POACurrent");
+      ACE_ASSERT (! CORBA::is_nil (obj.in ()));
+      this->current_ = PortableServer::Current::_narrow (obj.in ());
+
       // Activate ourself
-      PortableServer::ObjectId_var id = PortableServer::string_to_ObjectId ("ImR_Activator");
+      PortableServer::ObjectId_var id =
+        PortableServer::string_to_ObjectId ("ImR_Activator");
       this->imr_poa_->activate_object_with_id (id.in (), this);
       obj = this->imr_poa_->id_to_reference (id.in ());
       ImplementationRepository::ActivatorExt_var activator =
@@ -281,9 +286,30 @@ ImR_Activator_i::shutdown (void)
   this->shutdown (false);
 }
 
-void
-ImR_Activator_i::shutdown (bool wait_for_completion)
+bool
+ImR_Activator_i::in_upcall (void)
 {
+  try
+    {
+      PortableServer::POA_var poa = current_->get_POA ();
+      return !CORBA::is_nil (poa.in ());
+    }
+  catch (const CORBA::Exception& )
+    {
+      // no-op
+    }
+  return false;
+}
+
+void
+ImR_Activator_i::shutdown (bool signaled)
+{
+  if (signaled && this->in_upcall ())
+    {
+      if (debug_ > 0)
+        ORBSVCS_DEBUG ((LM_DEBUG, "ImR Activator: ignoring signal during upcall.\n"));
+      return;
+    }
   if (! CORBA::is_nil (this->locator_.in ()) && this->registration_token_ != 0)
     {
       try
@@ -298,7 +324,7 @@ ImR_Activator_i::shutdown (bool wait_for_completion)
     }
   this->locator_ = ImplementationRepository::Locator::_nil ();
 
-  this->orb_->shutdown (wait_for_completion);
+  this->orb_->shutdown (false);
 }
 
 CORBA::Boolean
@@ -331,16 +357,12 @@ ImR_Activator_i::kill_server (const char* name, CORBA::Long lastpid, CORBA::Shor
         ORBSVCS_DEBUG((LM_DEBUG,
                        "ImR Activator: Killing server <%C> "
                        "signal %d to pid %d, result = %d\n",
-                       name, signum, pid, result));
+                       name, signum, static_cast<int> (pid), result));
       if (!found && result == 0 && this->notify_imr_)
         {
           this->process_map_.bind (pid, name);
-#if (ACE_SIZEOF_VOID_P == 8)
-          ACE_INT64 token = static_cast<ACE_INT64>(pid);
-#else
-          ACE_INT32 token = static_cast<ACE_INT32>(pid);
-#endif
           ACE_Reactor *r = this->orb_->orb_core()->reactor();
+          Act_token_type token = static_cast<Act_token_type>(pid);
           r->schedule_timer (this, reinterpret_cast<void *>(token), ACE_Time_Value ());
         }
     }
@@ -363,13 +385,13 @@ ImR_Activator_i::still_alive (CORBA::Long pid)
 }
 
 bool
-ImR_Activator_i::still_running_i (const char *name)
+ImR_Activator_i::still_running_i (const char *name, pid_t &pid)
 {
   bool is_running =  this->server_list_.find (name) == 0;
-#if defined (ACE_WIN32)
+
   if (is_running)
     {
-      pid_t pid = ACE_INVALID_PID;
+      pid = ACE_INVALID_PID;
       for (ProcessMap::ITERATOR iter = this->process_map_.begin ();
            iter != process_map_.end ();
            iter++)
@@ -380,13 +402,14 @@ ImR_Activator_i::still_running_i (const char *name)
               break;
             }
         }
+#if defined (ACE_WIN32)
       if (pid != ACE_INVALID_PID)
         {
           pid_t waitp = this->process_mgr_.wait (pid, ACE_Time_Value::zero);
           is_running = (waitp != pid);
         }
-    }
 #endif /* ACE_WIN32 */
+    }
   return is_running;
 }
 
@@ -408,13 +431,17 @@ ImR_Activator_i::start_server(const char* name,
     ORBSVCS_DEBUG((LM_DEBUG,
                    "ImR Activator: Starting %C <%C>...\n",
                    (unique ? "unique server" : "server"), name));
-
-  if (unique && this->still_running_i (name))
+  pid_t pid;
+  if (unique && this->still_running_i (name, pid))
     {
       if (debug_ > 1)
         ORBSVCS_DEBUG((LM_DEBUG,
-                       "ImR Activator: Unique instance already running\n"));
-      return;
+                       "ImR Activator: Unique instance already running %d\n",
+                       static_cast<int> (pid)));
+      char reason[32];
+      ACE_OS::snprintf (reason,32,"pid:%d",static_cast<int> (pid));
+      throw ImplementationRepository::CannotActivate(
+        CORBA::string_dup (reason));
     }
 
   ACE_TString cmdline_tstr(ACE_TEXT_CHAR_TO_TCHAR(cmdline));
@@ -442,6 +469,8 @@ ImR_Activator_i::start_server(const char* name,
   // process's environment.
   proc_opts.enable_unicode_environment ();
 
+  proc_opts.setgroup (0);
+
   proc_opts.setenv (ACE_TEXT ("TAO_USE_IMR"), ACE_TEXT ("1"));
   if (!CORBA::is_nil (this->locator_.in ()))
     {
@@ -456,7 +485,7 @@ ImR_Activator_i::start_server(const char* name,
                         ACE_TEXT_CHAR_TO_TCHAR (env[i].value.in ()));
     }
 
-  pid_t pid = this->process_mgr_.spawn (proc_opts, this);
+  pid = this->process_mgr_.spawn (proc_opts, this);
   if (pid == ACE_INVALID_PID)
     {
       ORBSVCS_ERROR ((LM_ERROR,
@@ -465,14 +494,14 @@ ImR_Activator_i::start_server(const char* name,
       throw ImplementationRepository::CannotActivate(
         CORBA::string_dup (
           "Process Creation Failed"));
-      return;
     }
   else
     {
       if (debug_ > 1)
         {
           ORBSVCS_DEBUG((LM_DEBUG,
-            "ImR Activator: register death handler for process %d\n", pid));
+                         "ImR Activator: register death handler for process %d\n",
+                         static_cast<int> (pid)));
         }
       this->process_map_.rebind (pid, name);
       if (unique)
@@ -499,7 +528,7 @@ ImR_Activator_i::start_server(const char* name,
     {
       ORBSVCS_DEBUG ((LM_DEBUG,
                       ACE_TEXT ("(%P|%t) ImR Activator: Successfully started <%C>, pid=%d\n"),
-                      name, pid));
+                      name, static_cast<int> (pid)));
     }
 }
 
@@ -525,7 +554,7 @@ ImR_Activator_i::handle_exit_i (pid_t pid)
           ORBSVCS_DEBUG ((LM_DEBUG,
                           ACE_TEXT ("(%P|%t) ImR Activator: Notifying ImR that ")
                           ACE_TEXT ("server[%d], <%C> has exited.\n"),
-                          pid, name.c_str()));
+                          static_cast<int> (pid), name.c_str()));
         }
       try
         {
@@ -561,12 +590,7 @@ ImR_Activator_i::handle_exit (ACE_Process * process)
       ACE_Reactor *r = this->orb_->orb_core()->reactor();
       ACE_Time_Value dtv (0, this->induce_delay_ * 1000);
       pid_t pid = process->getpid();
-#if (ACE_SIZEOF_VOID_P == 8)
-      ACE_INT64 token = static_cast<ACE_INT64>(pid);
-#else
-      ACE_INT32 token = static_cast<ACE_INT32>(pid);
-#endif
-
+      Act_token_type token = static_cast<Act_token_type>(pid);
       r->schedule_timer (this, reinterpret_cast<void *>(token), dtv );
     }
   else
@@ -580,11 +604,7 @@ ImR_Activator_i::handle_exit (ACE_Process * process)
 int
 ImR_Activator_i::handle_timeout (const ACE_Time_Value &, const void * tok)
 {
-#if (ACE_SIZEOF_VOID_P == 8)
-  ACE_INT64 token = reinterpret_cast<ACE_INT64>(tok);
-#else
-  ACE_INT32 token = reinterpret_cast<ACE_INT32>(tok);
-#endif
+  Act_token_type token = reinterpret_cast<Act_token_type>(tok);
   this->handle_exit_i (static_cast<pid_t>(token));
   return 0;
 }

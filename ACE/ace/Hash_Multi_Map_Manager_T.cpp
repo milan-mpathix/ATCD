@@ -24,6 +24,13 @@
 
 ACE_BEGIN_VERSIONED_NAMESPACE_DECL
 
+ACE_ALLOC_HOOK_DEFINE_Tc5(ACE_Hash_Multi_Map_Manager)
+ACE_ALLOC_HOOK_DEFINE_Tc5(ACE_Hash_Multi_Map_Iterator_Base)
+ACE_ALLOC_HOOK_DEFINE_Tc5(ACE_Hash_Multi_Map_Const_Iterator_Base)
+ACE_ALLOC_HOOK_DEFINE_Tc5(ACE_Hash_Multi_Map_Iterator)
+ACE_ALLOC_HOOK_DEFINE_Tc5(ACE_Hash_Multi_Map_Const_Iterator)
+ACE_ALLOC_HOOK_DEFINE_Tc5(ACE_Hash_Multi_Map_Reverse_Iterator)
+
 template <class EXT_ID, class INT_ID>
 ACE_Hash_Multi_Map_Entry<EXT_ID, INT_ID>::ACE_Hash_Multi_Map_Entry (ACE_Hash_Multi_Map_Entry<EXT_ID, INT_ID> *next,
                                                                     ACE_Hash_Multi_Map_Entry<EXT_ID, INT_ID> *prev)
@@ -234,15 +241,12 @@ ACE_Hash_Multi_Map_Manager<EXT_ID, INT_ID, HASH_KEY, COMPARE_KEYS, ACE_LOCK>::bi
     }
   else
     {
-      int_id_set = (*entry).int_id_set_;
-
-      if (0 == int_id_set.insert (int_id))
+      result = entry->int_id_set_.insert (int_id);
+      if (result == 0)
         {
-          this->unbind_i (entry);
-          return this->bind_i (ext_id, int_id_set);
+          ++this->cur_size_;
         }
-      else
-        return 1;
+      return result;
     }
 }
 
@@ -330,11 +334,12 @@ ACE_Hash_Multi_Map_Manager<EXT_ID, INT_ID, HASH_KEY, COMPARE_KEYS, ACE_LOCK>::un
   entry->next_->prev_ = entry->prev_;
   entry->prev_->next_ = entry->next_;
 
+  int remove_size = entry->item().size();
   // Explicitly call the destructor.
   ACE_DES_FREE_TEMPLATE2 (entry, this->entry_allocator_->free,
                           ACE_Hash_Multi_Map_Entry, EXT_ID, INT_ID);
 
-  this->cur_size_--;
+  this->cur_size_ -= remove_size;
   return 0;
 }
 
@@ -353,18 +358,17 @@ ACE_Hash_Multi_Map_Manager<EXT_ID, INT_ID, HASH_KEY, COMPARE_KEYS, ACE_LOCK>::un
       return -1;
     }
 
-  ACE_Unbounded_Set<INT_ID> int_id_set = (*temp).int_id_set_;
-  if (0 == int_id_set.remove (int_id))
+  ACE_Unbounded_Set<INT_ID>& int_id_set = temp->int_id_set_;
+  int retval = int_id_set.remove (int_id);
+  if (retval == 0)
     {
-      this->unbind_i (temp);
-
-      if (0 != int_id_set.size ())
-        return this->bind_i (ext_id, int_id_set);
-      else
-        return 0;
+      --this->cur_size_;
+      if (int_id_set.is_empty())
+        {
+          this->unbind_i (temp);
+        }
     }
-  else
-    return -1;
+  return retval;
 }
 
 
@@ -448,8 +452,6 @@ ACE_Hash_Multi_Map_Manager<EXT_ID, INT_ID, HASH_KEY, COMPARE_KEYS, ACE_LOCK>::re
 
 // ------------------------------------------------------------
 
-ACE_ALLOC_HOOK_DEFINE(ACE_Hash_Multi_Map_Iterator_Base)
-
 template <class EXT_ID, class INT_ID, class HASH_KEY, class COMPARE_KEYS, class ACE_LOCK> void
 ACE_Hash_Multi_Map_Iterator_Base<EXT_ID, INT_ID, HASH_KEY, COMPARE_KEYS, ACE_LOCK>::dump_i (void) const
 {
@@ -521,8 +523,6 @@ ACE_Hash_Multi_Map_Iterator_Base<EXT_ID, INT_ID, HASH_KEY, COMPARE_KEYS, ACE_LOC
 }
 
 // ------------------------------------------------------------
-
-ACE_ALLOC_HOOK_DEFINE(ACE_Hash_Multi_Map_Const_Iterator_Base)
 
 template <class EXT_ID, class INT_ID, class HASH_KEY, class COMPARE_KEYS, class ACE_LOCK> void
 ACE_Hash_Multi_Map_Const_Iterator_Base<EXT_ID, INT_ID, HASH_KEY, COMPARE_KEYS, ACE_LOCK>::dump_i (void) const
